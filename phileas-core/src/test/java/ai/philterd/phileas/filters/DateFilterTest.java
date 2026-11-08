@@ -931,6 +931,32 @@ public class DateFilterTest extends AbstractFilterTest {
     }
 
     @Test
+    public void filterRandomReplaceMonthAbbreviationWithPeriodKeepsMonthNameFormat() throws Exception {
+
+        final DateFilterStrategy dateFilterStrategy = new DateFilterStrategy();
+        dateFilterStrategy.setStrategy(RANDOM_REPLACE);
+
+        final FilterConfiguration filterConfiguration = new FilterConfiguration.FilterConfigurationBuilder()
+                .withStrategies(List.of(dateFilterStrategy))
+                .build();
+
+        final DateFilter filter = new DateFilter(filterConfiguration, false, DateSpanValidator.getInstance());
+
+        for (final String date : List.of("Sep. 5, 2020", "Sept. 5, 2020", "Sep 5, 2020")) {
+
+            final Filtered filtered = filter.filter(contextService, getPolicy(), "context", PIECE, "Seen on " + date + " at the office.");
+            showSpans(filtered.getSpans());
+            Assertions.assertEquals(1, filtered.getSpans().size(), date);
+            Assertions.assertEquals(date, filtered.getSpans().get(0).getText(), date);
+
+            final String replacement = filtered.getSpans().get(0).getReplacement();
+            Assertions.assertTrue(replacement.matches("[A-Z][a-z]+ \\d{2}, \\d{4}"), date + " was replaced with " + replacement);
+
+        }
+
+    }
+
+    @Test
     public void filterWithCandidates1() throws Exception {
 
         final List<String> candidates = List.of("2000-01-01", "1999-12-31");
