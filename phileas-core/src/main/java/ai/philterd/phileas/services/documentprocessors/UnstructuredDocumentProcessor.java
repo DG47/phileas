@@ -19,6 +19,7 @@ import ai.philterd.phileas.filters.Filter;
 import ai.philterd.phileas.model.filtering.Explanation;
 import ai.philterd.phileas.model.filtering.Filtered;
 import ai.philterd.phileas.model.filtering.IncrementalRedaction;
+import ai.philterd.phileas.model.filtering.IncrementalRedactionSequence;
 import ai.philterd.phileas.model.filtering.Span;
 import ai.philterd.phileas.model.filtering.TextFilterResult;
 import ai.philterd.phileas.policy.Policy;
@@ -29,7 +30,6 @@ import ai.philterd.phileas.services.disambiguation.vector.VectorService;
 import ai.philterd.phileas.services.filters.postfilters.PostFilter;
 import ai.philterd.phileas.services.tokens.TokenCounter;
 import ai.philterd.phileas.services.tokens.WhitespaceTokenCounter;
-import org.apache.commons.codec.digest.DigestUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -145,6 +145,10 @@ public class UnstructuredDocumentProcessor implements DocumentProcessor {
         final StringBuilder sb = new StringBuilder(input.length());
         int copiedTo = 0;
 
+        // The incremental redactions share the input and the replacements rather than each holding a copy of the text.
+        final IncrementalRedactionSequence sequence = incrementalRedactionsEnabled
+                ? new IncrementalRedactionSequence(input, orderedSpans.size()) : null;
+
         for(final Span span : orderedSpans) {
 
             // Get the replacement. This might be the token itself or an anonymized version.
@@ -153,10 +157,9 @@ public class UnstructuredDocumentProcessor implements DocumentProcessor {
             sb.append(input, copiedTo, span.getCharacterStart()).append(replacement);
             copiedTo = span.getCharacterEnd();
 
-            if(incrementalRedactionsEnabled) {
-                // Hash the text at this point: the replacements so far and the rest of the input.
-                final String snapshot = sb + input.substring(copiedTo);
-                incrementalRedactions.add(new IncrementalRedaction(DigestUtils.sha256Hex(snapshot), span, snapshot));
+            if(sequence != null) {
+                // Hashes the text at this point: the replacements so far and the rest of the input.
+                incrementalRedactions.add(sequence.add(span));
             }
 
         }

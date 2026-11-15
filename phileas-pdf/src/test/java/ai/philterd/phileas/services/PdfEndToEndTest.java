@@ -65,6 +65,7 @@ import ai.philterd.phileas.services.strategies.rules.SsnFilterStrategy;
 import ai.philterd.phileas.services.strategies.rules.StateAbbreviationFilterStrategy;
 import ai.philterd.phileas.services.strategies.rules.UrlFilterStrategy;
 import ai.philterd.phileas.services.strategies.rules.VinFilterStrategy;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.pdfbox.Loader;
@@ -110,6 +111,10 @@ public class PdfEndToEndTest {
 
         for(final IncrementalRedaction incrementalRedaction : response.getIncrementalRedactions()) {
             LOGGER.info(incrementalRedaction.toString());
+            // The service moves each span to its offset in the document after the line is filtered,
+            // which must not change the line's text the redaction was hashed from.
+            Assertions.assertEquals(DigestUtils.sha256Hex(incrementalRedaction.getIncrementallyRedactedText()),
+                    incrementalRedaction.getHash());
         }
 
     }
