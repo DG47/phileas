@@ -58,6 +58,63 @@ public class DefaultContextServiceTest {
         Assertions.assertEquals(1, supplierCalls.get(), "the supplier must run only on the first call");
     }
 
+    @Test
+    public void computeValueIfAbsentGeneratesThenReuses() {
+        final DefaultContextService service = new DefaultContextService();
+        final AtomicInteger supplierCalls = new AtomicInteger();
+
+        final String first = service.computeValueIfAbsent("key", "filter-type", () -> {
+            supplierCalls.incrementAndGet();
+            return "generated";
+        });
+        final String second = service.computeValueIfAbsent("key", "filter-type", () -> {
+            supplierCalls.incrementAndGet();
+            return "should-not-be-used";
+        });
+
+        Assertions.assertEquals("generated", first);
+        Assertions.assertEquals("generated", second, "an existing value must be reused");
+        Assertions.assertEquals(1, supplierCalls.get(), "the supplier must run only on the first call");
+    }
+
+    @Test
+    public void computeValueIfAbsentIsAtomicUnderContention() throws Exception {
+        final DefaultContextService service = new DefaultContextService();
+        final int threads = 32;
+        final AtomicInteger supplierCalls = new AtomicInteger();
+        final Set<String> observed = Collections.newSetFromMap(new ConcurrentHashMap<>());
+        final CountDownLatch start = new CountDownLatch(1);
+        final CountDownLatch done = new CountDownLatch(threads);
+        final ExecutorService pool = Executors.newFixedThreadPool(threads);
+
+        try {
+            for (int i = 0; i < threads; i++) {
+                pool.submit(() -> {
+                    try {
+                        start.await();
+                        final String value = service.computeValueIfAbsent("shift", "date", () -> {
+                            supplierCalls.incrementAndGet();
+                            return String.valueOf(System.nanoTime());
+                        });
+                        observed.add(value);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        done.countDown();
+                    }
+                });
+            }
+
+            start.countDown();
+            Assertions.assertTrue(done.await(30, TimeUnit.SECONDS), "threads did not finish in time");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        Assertions.assertEquals(1, supplierCalls.get(), "the value must be generated exactly once");
+        Assertions.assertEquals(1, observed.size(), "every thread must observe the same value");
+    }
+
     /**
      * Guards finding #2: under concurrency the old contains/get/else-generate-put sequence let
      * multiple threads each generate a replacement for the same token. computeReplacementIfAbsent

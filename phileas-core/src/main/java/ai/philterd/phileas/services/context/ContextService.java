@@ -17,7 +17,10 @@ package ai.philterd.phileas.services.context;
 
 import java.util.function.Supplier;
 
-/** Stores per-context token-to-replacement mappings so a value is anonymized consistently within a context. */
+/**
+ * Stores per-context token-to-replacement mappings so a value is anonymized consistently within a context,
+ * and values that belong to the context itself, such as a context's random date shift.
+ */
 public interface ContextService {
 
     boolean containsToken(final String token);
@@ -44,5 +47,27 @@ public interface ContextService {
      *         supplier returns <code>null</code>.
      */
     String computeReplacementIfAbsent(final String token, final String filterType, final Supplier<String> replacementSupplier);
+
+    /**
+     * Atomically returns a value that belongs to the context rather than to a token, generating and
+     * storing one via <code>valueSupplier</code> only if the context has no value for the key. The
+     * date filter's random shift with the CONTEXT replacement scope is kept this way, so every date
+     * in the context is moved by the same amount. Like {@link #computeReplacementIfAbsent(String,
+     * String, Supplier)}, the supplier is invoked at most once per key.
+     *
+     * <p>The default implementation stores the value as a token replacement through {@link
+     * #computeReplacementIfAbsent(String, String, Supplier)}. An implementation that persists its
+     * entries, and may evict, delete, or list them, can override this method to store the value
+     * with the context, outside its token entries, so the value is not lost with them.</p>
+     *
+     * @param key The key of the value. A key cannot collide with a detected token.
+     * @param filterType The {@link ai.philterd.phileas.model.filtering.FilterType} the value is kept for.
+     * @param valueSupplier Supplies a freshly generated value when the context has none for the key.
+     * @return The existing or newly generated value. Never <code>null</code> unless the supplier
+     *         returns <code>null</code>.
+     */
+    default String computeValueIfAbsent(final String key, final String filterType, final Supplier<String> valueSupplier) {
+        return computeReplacementIfAbsent(key, filterType, valueSupplier);
+    }
 
 }

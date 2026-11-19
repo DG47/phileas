@@ -36,8 +36,12 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 public class DateFilterStrategyTest extends AbstractFilterStrategyTest {
@@ -601,6 +605,105 @@ public class DateFilterStrategyTest extends AbstractFilterStrategyTest {
 
         Assertions.assertEquals(first, second);
         Assertions.assertTrue(contextService.containsToken(DateFilterStrategy.CONTEXT_SHIFT_KEY));
+
+    }
+
+    @Test
+    public void randomShiftWithContextScopeIsKeptAsAContextValue() throws Exception {
+
+        final AnonymizationService anonymizationService = getAnonymizationService();
+        final FilterPattern filterPattern = new FilterPattern.FilterPatternBuilder(Pattern.compile("\\b\\d{4}-\\d{2}-\\d{2}"), 0.75).withFormat("uuuu-MM-dd").build();
+        final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("uuuu-MM-dd");
+
+        final AbstractFilterStrategy strategy = getFilterStrategy();
+        ((DateFilterStrategy)strategy).setShiftRandom(true);
+        strategy.setStrategy(AbstractFilterStrategy.SHIFT);
+        strategy.setReplacementScope(AbstractFilterStrategy.REPLACEMENT_SCOPE_CONTEXT);
+
+        // A context service that keeps context values apart from its token entries, as one that persists them can.
+        final Map<String, String> values = new ConcurrentHashMap<>();
+        final List<String> valueKeys = new ArrayList<>();
+        final List<String> replacementTokens = new ArrayList<>();
+        final ContextService contextService = new DefaultContextService() {
+
+            @Override
+            public String computeReplacementIfAbsent(final String token, final String filterType, final Supplier<String> replacementSupplier) {
+                replacementTokens.add(token);
+                return super.computeReplacementIfAbsent(token, filterType, replacementSupplier);
+            }
+
+            @Override
+            public String computeValueIfAbsent(final String key, final String filterType, final Supplier<String> valueSupplier) {
+                valueKeys.add(key);
+                Assertions.assertEquals(FilterType.DATE.getType(), filterType);
+                return values.computeIfAbsent(key, k -> valueSupplier.get());
+            }
+
+        };
+
+        final LocalDate admitted = LocalDate.parse("2020-01-05", formatter);
+        final LocalDate surgery = LocalDate.parse("2020-01-07", formatter);
+        final LocalDate shiftedAdmitted = LocalDate.parse(strategy.getReplacement(contextService, "name", "context", "2020-01-05", WINDOW, new Crypto(), new FPE(), anonymizationService, filterPattern).getReplacement(), formatter);
+        final LocalDate shiftedSurgery = LocalDate.parse(strategy.getReplacement(contextService, "name", "context", "2020-01-07", WINDOW, new Crypto(), new FPE(), anonymizationService, filterPattern).getReplacement(), formatter);
+
+        Assertions.assertEquals(List.of(DateFilterStrategy.CONTEXT_SHIFT_KEY, DateFilterStrategy.CONTEXT_SHIFT_KEY), valueKeys);
+        Assertions.assertFalse(replacementTokens.contains(DateFilterStrategy.CONTEXT_SHIFT_KEY));
+        Assertions.assertFalse(contextService.containsToken(DateFilterStrategy.CONTEXT_SHIFT_KEY));
+        Assertions.assertEquals(String.valueOf(ChronoUnit.DAYS.between(admitted, shiftedAdmitted)), values.get(DateFilterStrategy.CONTEXT_SHIFT_KEY));
+        Assertions.assertEquals(ChronoUnit.DAYS.between(admitted, surgery), ChronoUnit.DAYS.between(shiftedAdmitted, shiftedSurgery));
+
+    }
+
+    @Test
+    public void randomShiftWithContextScopeIsKeptAsAReplacementByDefault() throws Exception {
+
+        final AnonymizationService anonymizationService = getAnonymizationService();
+        final FilterPattern filterPattern = new FilterPattern.FilterPatternBuilder(Pattern.compile("\\b\\d{4}-\\d{2}-\\d{2}"), 0.75).withFormat("uuuu-MM-dd").build();
+
+        final AbstractFilterStrategy strategy = getFilterStrategy();
+        ((DateFilterStrategy)strategy).setShiftRandom(true);
+        strategy.setStrategy(AbstractFilterStrategy.SHIFT);
+        strategy.setReplacementScope(AbstractFilterStrategy.REPLACEMENT_SCOPE_CONTEXT);
+
+        // A context service written before computeValueIfAbsent keeps the shift as a token replacement, as before.
+        final Map<String, String> replacements = new ConcurrentHashMap<>();
+        final List<String> filterTypes = new ArrayList<>();
+        final ContextService contextService = new ContextService() {
+
+            @Override
+            public boolean containsToken(final String token) {
+                return replacements.containsKey(token);
+            }
+
+            @Override
+            public boolean containsReplacement(final String replacement) {
+                return replacements.containsValue(replacement);
+            }
+
+            @Override
+            public String getReplacement(final String token) {
+                return replacements.get(token);
+            }
+
+            @Override
+            public void putReplacement(final String token, final String replacement, final String filterType) {
+                replacements.put(token, replacement);
+            }
+
+            @Override
+            public String computeReplacementIfAbsent(final String token, final String filterType, final Supplier<String> replacementSupplier) {
+                filterTypes.add(filterType);
+                return replacements.computeIfAbsent(token, t -> replacementSupplier.get());
+            }
+
+        };
+
+        final String first = strategy.getReplacement(contextService, "name", "context", "2020-01-05", WINDOW, new Crypto(), new FPE(), anonymizationService, filterPattern).getReplacement();
+        final String second = strategy.getReplacement(contextService, "name", "context", "2020-01-05", WINDOW, new Crypto(), new FPE(), anonymizationService, filterPattern).getReplacement();
+
+        Assertions.assertEquals(first, second);
+        Assertions.assertTrue(contextService.containsToken(DateFilterStrategy.CONTEXT_SHIFT_KEY));
+        Assertions.assertEquals(List.of(FilterType.DATE.getType(), FilterType.DATE.getType()), filterTypes);
 
     }
 
